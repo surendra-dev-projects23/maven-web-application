@@ -1,0 +1,76 @@
+pipeline {
+    agent any
+        tools {
+            maven 'maven3.9.5'
+        }
+        triggers {
+            pollSCM '* * * * *'
+        }
+        options {
+            buildDiscarder logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '5', daysToKeepStr: '', numToKeepStr: '5')
+            timestamps()
+        }
+
+        stages {
+            stage('Checkout the code') {
+                steps {
+                    sendSlackNotifications("STARTED")
+                    git branch: 'development', credentialsId: '2aeb9b09-28ec-4788-abc6-a1c884c78294', url: 'https://github.com/surendra-dev-projects23/maven-web-application.git'
+                }
+            }
+            stage('Build') {
+                steps {
+                    sh "mvn clean package"
+                }
+            }
+            stage ('Execute SonarQube Report') {
+                steps {
+                    sh "mvn clean sonar:sonar"
+                }
+            }
+            stage ('Upload Artifact into Nexus') {
+                steps {
+                    sh "mvn clean deploy"
+                }
+            }
+            stage ("Deploy into Tomcat") {
+                steps {
+                    sshagent(['56571939-0671-401a-86c7-7fad7cb6f801']) {
+						sh "scp -o StrictHostKeyChecking=no target/maven-web-application.war ec2-user@172.31.37.173:/opt/apache-tomcat-9.0.83/webapps"
+                    }
+                }
+            }
+        }
+        //send slack notification
+        post {
+            success {
+                 sendSlackNotifications(currentBuild.result)
+            }
+            failure {
+                sendSlackNotifications(currentBuild.result)
+            }
+        }
+    }
+def sendSlackNotifications(String buildStatus = 'STRATED') {
+	buildStatus = buildStatus ?: 'SUCCESS'
+	
+	def colorName = 'RED'
+    def colorCode = '#FF0000'
+	def subject = "${buildStatus}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'"
+    def summary = "${subject} (${env.BUILD_URL})"
+
+  // Override default values based on build status
+  if (buildStatus == 'STARTED') {
+    color = 'ORANGE'
+    colorCode = '#FFA500'
+  } else if (buildStatus == 'SUCCESS') {
+    color = 'GREEN'
+    colorCode = '#00FF00'
+  } else {
+    color = 'RED'
+    colorCode = '#FF0000'
+  }
+
+  // Send notifications
+  slackSend(color: colorCode, message: summary,channel: 'superheros') 
+}
